@@ -1,3 +1,24 @@
+##############################################################
+## The simulation extrapolation technique meets ecology and evolution: 
+## A general and intuitive method to account for measurement error  
+##
+## R-code for P-SIMEX algorithm on heritability 
+## of tarsus length in song sparrows data
+##############################################################
+
+
+
+set.seed(123452)
+
+
+# control function
+is.integer0 <- function(x)
+{
+  is.integer(x) && length(x) == 0L
+}
+
+
+# load libraries
 library("pedigree")
 library("MCMCglmm")
 library("mvtnorm")
@@ -6,108 +27,91 @@ library("pedigreemm")
 library("AnimalINLA")
 library("INLA")
 library("Matrix")
+library("MasterBayes")
+library("AICcmodavg")
 
-
-set.seed(123452)
-
-# control function
-is.integer0 <- function(x)
-{
-  is.integer(x) && length(x) == 0L
-}
 
 # load data
-allbirds <- read.csv("SongSparrowData_noembr.csv", sep="\t")
+allbirds <- read.csv("Sparrows.csv")
 
+nbirds <- nrow(allbirds)
+
+# used later to replace fathers with random individuals from the same generation
 # calculate generation as birth year
 allbirds$generation_dad <- c()
 for (jj in 1:length(allbirds[ ,1])){
   
   mm <- which(allbirds$id == allbirds$social.father[jj])
-  if (is.integer0(mm)) allbirds$generation_dad[jj] <- NA
   if (!is.integer0(mm)) allbirds$generation_dad[jj] <- allbirds[mm, ]$birth.year
   
   
 }
 
 
+# load morphological data (tarsus length)
+morpho <- read.csv("Sparrows_morpho.csv")
 
-morpho <- read.csv("MandarteBiosBasicData2007.csv")
-
-
-
-
-
-w <- intersect(allbirds$id, morpho$ninecode)
-k <- which(is.element(morpho$ninecode, w))
-morpho <- morpho[k, ]
+# add sex information
 morpho$sex<-c()
 for ( i in 1:length(morpho[ ,1])) {
-  w<-which(allbirds$id==morpho$ninecode[i])
+  w<-which(allbirds$id==morpho$id[i])
   morpho$sex[i]<-allbirds$sex[w]
   
   
 }
 
-dati <- morpho[!is.na(morpho$sex), ]
+morpho <- morpho[!is.na(morpho$sex), ]
 
 # extract variables of interest
-trait <-data.frame(dati$ninecode, dati$mintars, dati$sex)
+trait <-data.frame(morpho$id, morpho$mintars, morpho$sex)
 names(trait)<-c("animal", "Y", "sex")
 
-# calculate true value
-# from genetic pedigree
-all.ids <- c(allbirds$id, allbirds$gen.father, allbirds$gen.mother)
-all.ids <- all.ids[!duplicated(all.ids)]
-all <- which(!is.na(all.ids))
+# calculate true value of heritability (from genetic pedigree)
+
+# extract genetic pedigree
 gen.dad <- c()
 gen.mom <- c()
 idg <- c()
 
-for (i in all) {
-  w <- which(allbirds$id == all.ids[i])
+for (i in 1:nbirds) {
+  w <- which(allbirds$id == i)
   idg[i] <- allbirds$id[w]
   gen.dad[i] <- allbirds$father[w]
   gen.mom[i] <- allbirds$mother[w]
   
 }
 
-
-# store genetic pedigree
 gen <- data.frame(id = idg, dam = gen.mom, sire = gen.dad)
 
-###########################################################################
-### New: I use the MasterBayes package and a much more efficient version of inversA():
-###########################################################################
+
 # use orderPed from MasterBayes:
-library(MasterBayes)
 gen <- orderPed(gen)
 
 # Replace the ringnumber by an id (1:nanimals)
 d.map <- data.frame(id=gen$id,id_new=1:(nrow(gen)))
-
 gen$id_new <- 1:(nrow(gen))
 gen$dam_new <- d.map[match(gen$dam,gen$id),"id_new"]
 gen$sire_new <- d.map[match(gen$sire,gen$id),"id_new"]
 
+# calculate the inverse matrix
 ainvOut <- inverseA(gen[, 4:6])
 Cmatrix <- ainvOut$Ainv
 
-# inbreeding was also directly calculated with inversA()
+# inbreeding calculated with inversA()
 f <- data.frame(gen$id_new ,ainvOut$inbreeding)
 names(f) <- c("id_new","f")
 
 
-# Generate a new id, running from 1:no_of_animals (directly stor id_new and IndexA and IndexA.2 for later use in INLA)
+# Generate a new id, running from 1:no_of_animals (store id_new and IndexA and IndexA.2 for later use in INLA)
 trait$IndexA <- trait$IndexA.2 <- trait$id_new <- d.map[match(trait$animal,d.map$id),"id_new"]
 
-trait$f <- f[match(trait$id_new,f$id_new),"f"] #merge(trait,f,by="id_new")
-###########################################################################
-
-p.var <- var(trait$Y, na.rm = TRUE)
+trait$f <- f[match(trait$id_new,f$id_new),"f"] 
 
 
 #fit the inla model
+
+p.var <- var(trait$Y, na.rm = TRUE)
+
 formula = Y ~ sex + f +
   f(IndexA, model = "generic0", Cmatrix = Cmatrix, 
     hyper=list(prec=list(param = c(1/2,p.var/6))),
@@ -136,19 +140,15 @@ low.true <- HPDinterval(as.mcmc(h2))
 up.true <- HPDinterval(as.mcmc(h2))
 
 
-# compute naive heritability with INLA
+# compute naive value of heritability (from social pedigree)
 
-
-#calculate social inbreeding coefficient
-all.ids1<-c(allbirds$id, allbirds$social.father, allbirds$social.mother)
-all.ids1<-all.ids1[!duplicated(all.ids1)]
-all1<-which(!is.na(all.ids1))
+# extract social pedigree
 soc.dad<-c()
 soc.mom<-c()
 idg<-c()
 
-for (i in all1) {
-  w<-which(allbirds$id==all.ids1[i])
+for (i in 1:nbirds) {
+  w<-which(allbirds$id == i)
   idg[i]<-allbirds$id[w]
   soc.dad[i]<-allbirds$social.father[w]
   soc.mom[i]<-allbirds$social.mother[w]
@@ -156,9 +156,7 @@ for (i in all1) {
 }
 
 soc<-data.frame(id=idg, dam=soc.mom, sire=soc.dad)
-###########################################################################
-### New: I use the MasterBayes package and a much more efficient version of inversA():
-###########################################################################
+
 # use orderPed from MasterBayes:
 soc <- orderPed(soc)
 
@@ -169,24 +167,25 @@ soc$id_new <- 1:(nrow(soc))
 soc$dam_new <- d.map[match(soc$dam,soc$id),"id_new"]
 soc$sire_new <- d.map[match(soc$sire,soc$id),"id_new"]
 
+# calculate the inverse matrix
 ainvOut <- inverseA(soc[4:6])
 Cmatrix <- ainvOut$Ainv
 
-# inbreeding was also directly calculated with inversA()
+# inbreeding calculated with inversA()
 f <- data.frame(soc$id_new ,ainvOut$inbreeding)
 names(f) <- c("id_new","f")
 
-# Generate a new id, running from 1:no_of_animals (directly stor id_new and IndexA and IndexA.2 for later use in INLA)
+# Generate a new id, running from 1:no_of_animals (store id_new and IndexA and IndexA.2 for later use in INLA)
 trait$IndexA <- trait$IndexA.2 <- trait$id_new <- d.map[match(trait$animal,d.map$id),"id_new"]
 
 trait$f <- f[match(trait$id_new,f$id_new),"f"] #merge(trait,f,by="id_new")
-###########################################################################
 
-
-p.var <- var(trait$Y, na.rm = TRUE)
 
 
 #fit the inla model
+
+p.var <- var(trait$Y, na.rm = TRUE)
+
 formula.naive = Y ~ sex + f +
   f(IndexA, model = "generic0", Cmatrix = Cmatrix, 
     hyper=list(prec=list(param = c(1/2,p.var/6))),
@@ -232,17 +231,13 @@ nsim <- 100
   
   for (k in 1:length(lambda)){
     for (j in 1:nsim) {
-      all.ids <- c(allbirds$id, allbirds$social.father, allbirds$social.mother)
-      all.ids <- all.ids[!duplicated(all.ids)]
-      all <- which(!is.na(all.ids))
-      
       
       dad<-c()
       mom<-c()
       id<-c()
       
-      for (i in all) {
-        w<-which(allbirds$id==all.ids[i])
+      for (i in 1:nbirds) {
+        w<-which(allbirds$id == i)
         id[i] <- allbirds$id[w]
         dad[i] <- allbirds$social.father[w]
         mom[i] <- allbirds$social.mother[w]
@@ -261,44 +256,6 @@ nsim <- 100
       }
       pedsim <- data.frame(id = id, dam = mom, sire = dad)
       
-      # ord <- orderPed(pedsim)
-      # pedsim <- pedsim[order(ord),]
-      # 
-      # f <- data.frame(pedsim$id, calcInbreeding(pedsim))
-      # names(f) <- c("Individual", "f")
-      # 
-      # trait <-data.frame(dati$ninecode, dati$mintars, dati$sex)
-      # names(trait)<-c("animal", "Y", "sex")
-      # 
-      # 
-      # trait$Individual <- trait$animal
-      # trait <- merge(trait, f, by = "Individual")
-      # 
-      # 
-      # 
-      # 
-      # pedigree <- data.frame(as.numeric(pedsim$id), as.numeric(pedsim$sire), as.numeric(pedsim$dam))
-      # for (i in 1:length(pedigree[,1])) {
-      #   if (is.na(pedigree[i,1])) pedigree[i,1]<-0
-      #   if (is.na(pedigree[i,2])) pedigree[i,2]<-0
-      #   if (is.na(pedigree[i,3])) pedigree[i,3]<-0
-      # }
-      # names(pedigree) <- c('Individual', 'Parent1', 'Parent2')
-      # xx = compute.Ainverse(pedigree)
-      # Ainv = xx$Ainverse
-      # map  = xx$map
-      # Cmatrix = sparseMatrix(i=Ainv[,1],j=Ainv[,2],x=Ainv[,3])
-      # 
-      # #ID
-      # Ndata = dim(trait)[1]
-      # trait$ID <- trait$Individual
-      # trait$IndexA = rep(0,Ndata)
-      # trait$IndexA.2 = rep(0,Ndata)
-      # for(i in 1:Ndata)    trait$IndexA[i] = which(map[,1]==trait$ID[i])
-      # for(i in 1:Ndata)    trait$IndexA.2[i] = which(map[,1]==trait$ID[i])
-      ###########################################################################
-      ### New: I use the MasterBayes package and a much more efficient version of inversA():
-      ###########################################################################
       # use orderPed from MasterBayes:
       pedsim <- orderPed(pedsim)
       
@@ -309,23 +266,25 @@ nsim <- 100
       pedsim$dam_new <- d.map[match(pedsim$dam,pedsim$id),"id_new"]
       pedsim$sire_new <- d.map[match(pedsim$sire,pedsim$id),"id_new"]
       
+      # calculate the inverse matrix
       ainvOut <- inverseA(pedsim[4:6])
       Cmatrix <- ainvOut$Ainv
       
-      # inbreeding was also directly calculated with inversA()
+      # inbreeding calculated with inversA()
       f <- data.frame(pedsim$id_new ,ainvOut$inbreeding)
       names(f) <- c("id_new","f")
       
-      # Generate a new id, running from 1:no_of_animals (directly stor id_new and IndexA and IndexA.2 for later use in INLA)
+      # Generate a new id, running from 1:no_of_animals (store id_new and IndexA and IndexA.2 for later use in INLA)
       trait$IndexA <- trait$IndexA.2 <- trait$id_new <- d.map[match(trait$animal,d.map$id),"id_new"]
       
-      trait$f <- f[match(trait$id_new,f$id_new),"f"] #merge(trait,f,by="id_new")
-      ###########################################################################
+      trait$f <- f[match(trait$id_new,f$id_new),"f"] 
       
-      p.var <- var(trait$Y, na.rm = TRUE)
       
       
       #fit the inla model
+      
+      p.var <- var(trait$Y, na.rm = TRUE)
+      
       formula.sim = Y ~ sex + f +
         f(IndexA, model = "generic0", Cmatrix = Cmatrix, 
           hyper=list(prec=list(param = c(1/2,p.var/6))),
@@ -356,12 +315,6 @@ nsim <- 100
       
     }
   }
-
-
-write.table(h, 'h_inla2005.txt')
-write.table(sd, 'sd_inla2005.txt')
-write.table(low, 'low_inla2005.txt')
-write.table(up, 'up_inla2005.txt')
 
 
 # compute means across simulations
@@ -433,7 +386,6 @@ extrapolation_var1<- lm(Stot ~ lambda+ I(lambda^2))
 extrapolation_var2<- lm(Stot ~ lambda+ I(lambda^2)+ I(lambda^3))
 (var_pred2<-predict(extrapolation_var2, newdata = data.frame(lambda = 0)))
 
-library(AICcmodavg)
 AICc(extrapolation_h)
 
 AICc(extrapolation_h2)

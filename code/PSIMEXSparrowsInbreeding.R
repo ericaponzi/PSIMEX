@@ -3,7 +3,7 @@
 ## A general and intuitive method to account for measurement error  
 ##
 ## R-code for P-SIMEX algorithm on inbreeding depression
-## in song sparrows data
+## of juvenile survival in song sparrows data
 ##############################################################
 
 
@@ -18,38 +18,36 @@ is.integer0 <- function(x)
 }
 
 
-
+# load libraries
 library(pedigree)
 library(MCMCglmm)
 library(parallel)
 library(lme4)
+library(AICcmodavg)
 
-#Load datasets 
-allbirds <- read.csv("SongSparrowData_noembr.csv", sep="\t")
-allbirds$ninecode <- allbirds$id
-# calculate life time and survival
-allbirds$life <- allbirds$death.year- allbirds$birth.year
-# juvenile survival is 1 if life is at least one year, 0 otherwise
-allbirds$js <- as.numeric(allbirds$life>0)
+#Load dataset
+allbirds <- read.csv("Sparrows.csv")
+
 
 # calculate generation as birth year
+# used later to replace fathers with random individuals from the same generation
 allbirds$generation_dad <- c()
 for (jj in 1:length(allbirds[ ,1])){
   
   mm <- which(allbirds$id == allbirds$social.father[jj])
-  if (is.integer0(mm)) allbirds$generation_dad[jj] <- NA
   if (!is.integer0(mm)) allbirds$generation_dad[jj] <- allbirds[mm, ]$birth.year
   
   
 }
 
 allbirds <- allbirds[which(!is.na(allbirds$generation_dad)), ]
-allbirds <- allbirds[which(!duplicated(allbirds$ninecode)), ]
+allbirds <- allbirds[which(!duplicated(allbirds$id)), ]
 
 
-# true value to compare
+# true value of inbreeding depression
 # from genetic pedigree
 # use f.corr from data set
+
 # store covariates of interest
 trait1 <- data.frame(allbirds$id, allbirds$js, allbirds$f.corr,  allbirds$sex, allbirds$Year)
 names(trait1) <- c("ID", "h", "f", "sex", "Year")
@@ -68,9 +66,9 @@ true <- summary(model1)$coefficients[2,1]
 se_true <- summary(model1)$coefficients[2,2]
 
 
-
-# extract social pedigree 
-pedigree <- data.frame(allbirds$ninecode, allbirds$social.mother, allbirds$social.father) 
+# naive value of inbreeding depression
+# from social pedigree 
+pedigree <- data.frame(allbirds$id, allbirds$social.mother, allbirds$social.father) 
 names(pedigree) <- c("id", "dam", "sire")
 
 # order pedigree
@@ -85,7 +83,7 @@ trait <- data.frame(allbirds$id, allbirds$js)
 names(trait) <- c("ID", "h")
 trait <- merge(trait, f_inb, by = "ID")
 trait$f <- as.numeric(trait$f_sim)
-trait <- data.frame(allbirds$ninecode, allbirds$js, trait$f, allbirds$sex, allbirds$Year)
+trait <- data.frame(allbirds$id, allbirds$js, trait$f, allbirds$sex, allbirds$Year)
 names(trait) <- c("ID", "h", "f", "sex", "Year")
 
 # calculate naive estimate of inbreeding depression
@@ -109,10 +107,10 @@ var_inb0 <- var(trait$f)
 
 # apply PSIMEX
 # increasing error proportions 
-lambda0 <- c(0.2, 0.3, 0.4, 0.5,  0.6, 0.7, 0.8)
+lambda0 <- seq(0.2, 0.8, 0.1)
 # actual error proportion needed 
 lambda <- 1- (1-lambda0)/(1-0.17) 
-# total number of PSIMEX iteration
+# total number of PSIMEX iterations
 nsim <- 100
 
 # check if parentages are all known
@@ -155,7 +153,7 @@ for (k in 1:length(lambda)){
     #recalculate pedigree
     ped <- data.frame(id = animal, dam = dam, sire = sire)
     ped <- rbind(ped, unknown)
-    ord <- orderPed(ped)
+    ord <- pedigree::orderPed(ped)
     ped <- ped[order(ord),]
     
     #re calculate inbreeding coefficient
@@ -201,8 +199,6 @@ for (k in 1:length(lambda)){
 }
 
 
-inb <- read.table('Sparrows_inbreeding_sim.txt')
-se_inb <- read.table('Sparrows_seinbreeding_sim.txt')
 #compute means across simulations
 inb_ave <- rowMeans(inb, na.rm = TRUE)
 se_inb_ave <- rowMeans(se_inb, na.rm = TRUE)
@@ -218,8 +214,6 @@ mean_inb <- c(mean_inb0,mean_inb_ave)
 median_inb <- c(median_inb0, median_inb_ave)
 var_inb <- c(var_inb0, var_inb_ave)
 
-low <- inb_ave-1.96*se_inb
-up <- inb_ave+1.96*se_inb
 
 
 # Extrapolation phase of PSIMEX
@@ -250,15 +244,15 @@ AICc(extrapolation_inb1)
 # calculate SIMEX SE
 
 
-# first component 
-# sampling variability
+# first component is the sampling variability
+
 S <- c()
 #one per lambda 
 for ( i in 1:length(lambda0)) {
   diff <- c()
   #calculate the differences per each simulation
   for ( j in 1: nsim ) {
-    diff[j] <- inb[j,i]-inb_ave[i]
+    diff[j] <- inb[i,j]-inb_ave[i]
   }
   
   diff <- na.omit(diff)
@@ -267,6 +261,8 @@ for ( i in 1:length(lambda0)) {
 }
 S <- c(0, S)
 
+# calculate the total standard error
+# second component is the se from regressions
 S1 <- se_inb
 S2 <- S
 Stot <- S1 - S2
@@ -287,9 +283,9 @@ var_pred2<-predict(extrapolation_var2, newdata = data.frame(lambda = 0))
 
 # bias
 bias_naive <- inb0 - true
-bias_linear <- inb_pred - true
-bias_quad <- inb_pred1 - true
-bias_cubic <- inb_pred2 - true
+bias_linear <- inb_pred1 - true
+bias_quad <- inb_pred2 - true
+bias_cubic <- inb_pred3 - true
 
 # MSE
 MSE_naive <- bias_naive^2 + se_inb0^2
