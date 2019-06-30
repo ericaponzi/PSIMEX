@@ -49,7 +49,7 @@ allbirds <- allbirds[which(!duplicated(allbirds$id)), ]
 # use f.corr from data set
 
 # store covariates of interest
-trait1 <- data.frame(allbirds$id, allbirds$js, allbirds$f.corr,  allbirds$sex, allbirds$Year)
+trait1 <- data.frame(allbirds$id, allbirds$js, allbirds$f.corr,  allbirds$sex, allbirds$birth.year)
 names(trait1) <- c("ID", "h", "f", "sex", "Year")
 
 
@@ -83,7 +83,7 @@ trait <- data.frame(allbirds$id, allbirds$js)
 names(trait) <- c("ID", "h")
 trait <- merge(trait, f_inb, by = "ID")
 trait$f <- as.numeric(trait$f_sim)
-trait <- data.frame(allbirds$id, allbirds$js, trait$f, allbirds$sex, allbirds$Year)
+trait <- data.frame(allbirds$id, allbirds$js, trait$f, allbirds$sex, allbirds$birth.year)
 names(trait) <- c("ID", "h", "f", "sex", "Year")
 
 # calculate naive estimate of inbreeding depression
