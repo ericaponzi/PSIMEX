@@ -1,0 +1,31 @@
+Data for 'The simulation extrapolation technique meets ecology and evolution: A general and intuitive method to account for measurement error'
+Ponzi, Keller & Muff, Methods in Ecology and Evolution, 2019
+
+This folder contains the phenotypic data for the estimation of inbreeding depression of juvenile survival and heritability of tarsus length. The data come from the long-term song sparrow field study on Mandarte Island, BC, Canada. The data provided here are sufficient to replicate the analyses presented in the above paper, and are therefore a restricted subset of the full Mandarte dataset.
+If you are interested in running further analyses that require further data then please get in touch with Prof Lukas Keller (University of Zurich).
+
+
+Key to variables:
+
+FILE = Sparrows.csv
+"id" individual identity of the bird
+"gen.father" id of the genetic father (sire from genetic pedigree)
+"gen.mother" id of the genetic mother (dam from genetic pedigree)
+"social.father" id of the social father (sire from social pedigree)
+"social.mother" id of the social mother (dam from social pedigree)
+"father" id of the correct father (sire from correct pedigree)
+"mother" id of the correct mother (dam from correct pedigree)	
+"js" juvenile survival (1 if survived until the end of the first year, 0 otherwise)
+"f.corr" correct coefficient of inbreeding
+"sex" sex of the bird 
+"birth.year" year the bird was born
+
+
+FILE = Sparrows_morpho.csv
+"id" individual identity of the bird
+"mintars" tarsus length measure
+
+
+
+
+
